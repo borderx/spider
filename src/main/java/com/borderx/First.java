@@ -4,8 +4,8 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import org.apache.commons.httpclient.ConnectTimeoutException;
-import org.apache.commons.httpclient.NoHttpResponseException;
 import org.apache.commons.httpclient.SimpleHttpConnectionManager;
 import org.apache.commons.httpclient.methods.PostMethod;
 import org.apache.commons.httpclient.params.HttpClientParams;
@@ -14,9 +14,9 @@ import org.apache.commons.lang.StringUtils;
 import org.apache.http.Header;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
+import org.apache.http.NoHttpResponseException;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.config.RequestConfig;
-import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.conn.ConnectionKeepAliveStrategy;
 import org.apache.http.entity.StringEntity;
@@ -27,9 +27,7 @@ import org.apache.http.protocol.HttpContext;
 import org.apache.http.util.EntityUtils;
 
 import java.io.*;
-import java.util.List;
-import java.util.Properties;
-import java.util.Scanner;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -66,7 +64,8 @@ public class First {
                 .setDefaultRequestConfig(requestConfig)
 //                .setRetryHandler(new DefaultHttpRequestRetryHandler())
                 .setRetryHandler((exception, executionCount, context) -> {
-                    if (executionCount > 3) {
+                    System.out.println(exception.getMessage() + "************" + executionCount + exception.getClass());
+                    if (executionCount > 5) {
                         return false;
                     }
                     if (exception instanceof NoHttpResponseException     //NoHttpResponseException 重试
@@ -184,15 +183,22 @@ public class First {
     public static boolean sale0(String petId) {
         String amount = config.getProperty("amount", "1799");
         String url = "https://pet-chain.baidu.com/data/market/salePet";
-        String param = "{\"petId\":\"" + petId + "\",\"amount\":\"" + amount + "\",\"requestId\":1517766699838,\"appId\":1,\"tpl\":\"\"}";
-        String result = request(url, param);
+        Map<String, Object> params = Maps.newHashMap();
+        params.put("petId", petId);
+        params.put("amount", amount);
+        params.put("requestId", new Date().getTime());
+        params.put("appId", "1");
+        params.put("tpl", "");
+        String body = JSON.toJSONString(params);
+        String result = request(url, body);
         if(StringUtils.isNotBlank(result)) {
             JSONObject data = JSON.parseObject(result);
             if("00".equals(data.getString("errorNo"))) {
                 System.out.println("--------sale petId:" + petId + " success-----------");
                 return true;
             }
-        }System.out.println("--------sale petId:" + petId + " fail-----------");
+        }
+        System.out.println("--------sale petId:" + petId + " fail-----------");
         return false;
     }
 
@@ -211,7 +217,6 @@ public class First {
                         String petId = object.getString("petId");
                         double amount = object.getDouble("amount");
                         int rareDegree = object.getInteger("rareDegree");
-//                        String id = object.getString("id");
                         if (gone.contains(petId)) {
                             continue;
                         }
@@ -237,8 +242,12 @@ public class First {
 
     public static int buy0(String petId, int rareDegree) {
         String url = "https://pet-chain.baidu.com/data/pet/queryPetById";
-        String param = "{\"petId\":\"" + petId + "\",\"requestId\":1517803027371,\"appId\":1,\"tpl\":\"\"}";
-        String result = request(url, param);
+        Map<String, Object> params = Maps.newHashMap();
+        params.put("petId", petId);
+        params.put("requestId", new Date().getTime());
+        params.put("appId", "1");
+        params.put("tpl", "");
+        String result = request(url, JSON.toJSONString(params));
         if (StringUtils.isNotBlank(result)) {
             JSONObject data = JSON.parseObject(result);
             if ("00".equals(data.getString("errorNo"))) {
@@ -278,7 +287,12 @@ public class First {
     }
 
     public static String getBuyParam(String petId) {
-        return "{\"petId\":\"" + petId + "\",\"requestId\":1517729855098,\"appId\":1,\"tpl\":\"\"}";
+        Map<String, Object> params = Maps.newHashMap();
+        params.put("petId", petId);
+        params.put("requestId", new Date().getTime());
+        params.put("appId", "1");
+        params.put("tpl", "");
+        return JSON.toJSONString(params);
     }
 
     public static String request1(String url, String params) {
@@ -345,16 +359,16 @@ public class First {
             reqEntity.setContentEncoding("UTF-8");
             reqEntity.setContentType("application/json");
 
-            RequestConfig requestConfig = RequestConfig.custom()
-                    .setConnectTimeout(1000)//一、连接超时：connectionTimeout-->指的是连接一个url的连接等待时间
-                    .setSocketTimeout(3000)// 二、读取数据超时：SocketTimeout-->指的是连接上一个url，获取response的返回等待时间
-                    .setConnectionRequestTimeout(3000)
-                    .build();
+//            RequestConfig requestConfig = RequestConfig.custom()
+//                    .setConnectTimeout(1000)//一、连接超时：connectionTimeout-->指的是连接一个url的连接等待时间
+//                    .setSocketTimeout(3000)// 二、读取数据超时：SocketTimeout-->指的是连接上一个url，获取response的返回等待时间
+//                    .setConnectionRequestTimeout(3000)
+//                    .build();
 
             client = httpClientBuilder.build();
             HttpPost post = new HttpPost(url);
             post.setEntity(reqEntity);
-            post.setConfig(requestConfig);
+//            post.setConfig(requestConfig);
             post.setHeaders(headers.toArray(new Header[]{}));
             response = client.execute(post);
             if (response.getStatusLine().getStatusCode() == 200) {
@@ -366,7 +380,7 @@ public class First {
             }
             System.out.println(response.getStatusLine().getStatusCode());
             return null;
-        } catch (org.apache.http.NoHttpResponseException e1) {
+        } catch (NoHttpResponseException e1) {
 //            e1.printStackTrace();
             try {
                 long noHttpResponseSleep = Long.valueOf(config.getProperty("noHttpResponseSleep", "5000"));
