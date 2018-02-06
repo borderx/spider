@@ -64,15 +64,14 @@ public class First {
                 .setDefaultRequestConfig(requestConfig)
 //                .setRetryHandler(new DefaultHttpRequestRetryHandler())
                 .setRetryHandler((exception, executionCount, context) -> {
-                    System.out.println(exception.getMessage() + "************" + executionCount + exception.getClass());
-                    if (executionCount > 5) {
-                        return false;
-                    }
-                    if (exception instanceof NoHttpResponseException     //NoHttpResponseException 重试
-                            || exception instanceof ConnectTimeoutException //连接超时重试
-                            ) {
-                        return true;
-                    }
+//                    if (executionCount > 5) {
+//                        return false;
+//                    }
+//                    if (exception instanceof NoHttpResponseException     //NoHttpResponseException 重试
+//                            || exception instanceof ConnectTimeoutException //连接超时重试
+//                            ) {
+//                        return true;
+//                    }
                     return false;
                 })
                 .setKeepAliveStrategy(connectionKeepAliveStrategy);
@@ -100,16 +99,8 @@ public class First {
 
     public static void main(String[] args) throws Exception {
         whoAmI();
-        new Thread(new Runnable() {
-            public void run() {
-                buy();
-            }
-        }).start();
-        new Thread(new Runnable() {
-            public void run() {
-                sale();
-            }
-        }).start();
+        new Thread(() -> buy()).start();
+        new Thread(() -> sale()).start();
 
         new Scanner(System.in).nextLine();
     }
@@ -217,12 +208,13 @@ public class First {
                         String petId = object.getString("petId");
                         double amount = object.getDouble("amount");
                         int rareDegree = object.getInteger("rareDegree");
+                        String validCode = object.getString("validCode");
                         if (gone.contains(petId)) {
                             continue;
                         }
                         if (amount <= Double.valueOf(config.getProperty("rareDegree" + rareDegree)) && generation == 0) {
                             need = true;
-                            buy0(petId, rareDegree);
+                            buy0(petId, rareDegree, validCode);
                         }
                     }
                     if(!need) {
@@ -240,7 +232,7 @@ public class First {
         }
     }
 
-    public static int buy0(String petId, int rareDegree) {
+    public static int buy0(String petId, int rareDegree, String validCode) {
         String url = "https://pet-chain.baidu.com/data/pet/queryPetById";
         Map<String, Object> params = Maps.newHashMap();
         params.put("petId", petId);
@@ -255,7 +247,10 @@ public class First {
                 double amount = data.getJSONObject("data").getDouble("amount");
                 int generation = data.getJSONObject("data").getInteger("generation");
                 if (amount <= Double.valueOf(config.getProperty("rareDegree" + rareDegree)) && generation == 0) {
-                    String buyStr = getBuyParam(petId);
+                    Map<String, String> validInfo = validInfo();
+                    String seed = validInfo.get("seed");
+                    String captcha = validInfo.get("captcha");
+                    String buyStr = getBuyParam(petId, String.valueOf(amount), validCode, seed, captcha);
                     String res = request("https://pet-chain.baidu.com/data/txn/create", buyStr);
                     if (StringUtils.isNotBlank(res)) {
                         JSONObject b = JSON.parseObject(res);
@@ -286,9 +281,56 @@ public class First {
         return -1;
     }
 
-    public static String getBuyParam(String petId) {
+    public static Map<String, String> validInfo() {
+        int count = 1;
+        while(true) {
+            System.out.println("validInfo time:" + count);
+            Map<String, String> gen = gen();
+            if(gen != null) {
+                String img = gen.get("img");
+                String seed = gen.get("seed");
+                String captcha = ValidCodeUtils.base64Valid(img);
+                if(StringUtils.isNotBlank(captcha) && captcha.length() == 4) {
+                    Map<String, String> map = Maps.newHashMap();
+                    map.put("seed", seed);
+                    map.put("captcha", captcha);
+                    return map;
+                }
+            }
+        }
+    }
+
+    public static Map<String, String> gen() {
+        String url = "https://pet-chain.baidu.com/data/captcha/gen";
+        Map<String, Object> params = Maps.newHashMap();
+        params.put("requestId", new Date().getTime());
+        params.put("appId", "1");
+        params.put("tpl", "");
+        String result = request(url, JSON.toJSONString(params));
+        if (StringUtils.isNotBlank(result)) {
+            JSONObject data = JSON.parseObject(result);
+            if ("00".equals(data.getString("errorNo"))) {
+                String img = data.getJSONObject("data").getString("img");
+                String seed = data.getJSONObject("data").getString("seed");
+                Map<String, String> map = Maps.newHashMap();
+                map.put("img", img);
+                map.put("seed", seed);
+                return map;
+            }
+        }
+        System.out.println("gen fail........");
+        return null;
+    }
+
+    public static String getBuyParam(String petId, String amount, String validCode, String seed, String captcha) {
+//        String pre = request("https://pet-chain.baidu.com/data/market/shouldJump2JianDan", "{\"requestId\":1517888235078,\"appId\":1,\"tpl\":\"\"}");
+//        System.out.println(pre);
         Map<String, Object> params = Maps.newHashMap();
         params.put("petId", petId);
+        params.put("amount", amount);
+        params.put("seed", seed);
+        params.put("captcha", captcha);
+        params.put("validCode", validCode);
         params.put("requestId", new Date().getTime());
         params.put("appId", "1");
         params.put("tpl", "");
@@ -374,12 +416,13 @@ public class First {
             if (response.getStatusLine().getStatusCode() == 200) {
                 HttpEntity resEntity = response.getEntity();
                 String message = EntityUtils.toString(resEntity, "utf-8");
-                System.out.println(message);
+                if(!"https://pet-chain.baidu.com/data/captcha/gen".equals(url)) {
+                    System.out.println(message);
+                }
                 EntityUtils.consume(resEntity);
                 return message;
             }
             System.out.println(response.getStatusLine().getStatusCode());
-            return null;
         } catch (NoHttpResponseException e1) {
 //            e1.printStackTrace();
             try {
@@ -394,8 +437,9 @@ public class First {
         } catch (Exception e) {
             e.printStackTrace();
             System.out.println(e.getMessage());
-        } finally {
-
+        }
+        if("https://pet-chain.baidu.com/data/txn/create".equals(url)) {
+            return request(url, params);
         }
         return null;
     }
