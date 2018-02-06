@@ -196,7 +196,8 @@ public class First {
     public static void buy() {
         int count = 0;
         while(true) {
-            String listStr = request("https://pet-chain.baidu.com/data/market/queryPetsOnSale", "{\"pageNo\":1,\"pageSize\":200,\"querySortType\":\"AMOUNT_ASC\",\"petIds\":[],\"lastAmount\":null,\"lastRareDegree\":null,\"requestId\":1517729851864,\"appId\":1,\"tpl\":\"\"}");
+            int page = (count % 5) + 1;
+            String listStr = request("https://pet-chain.baidu.com/data/market/queryPetsOnSale", "{\"pageNo\":" + page + ",\"pageSize\":20,\"querySortType\":\"AMOUNT_ASC\",\"petIds\":[],\"lastAmount\":null,\"lastRareDegree\":null,\"requestId\":1517729851864,\"appId\":1,\"tpl\":\"\"}");
             if (StringUtils.isNotBlank(listStr)) {
                 JSONObject data = JSON.parseObject(listStr);
                 if ("00".equals(data.getString("errorNo"))) {
