@@ -2,6 +2,8 @@ package com.borderx;
 
 import net.sourceforge.tess4j.Tesseract;
 import net.sourceforge.tess4j.TesseractException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import sun.misc.BASE64Decoder;
 
 import javax.imageio.ImageIO;
@@ -17,6 +19,8 @@ import java.util.List;
  */
 public class ValidCodeUtils {
 
+    private static final Logger logger = LoggerFactory.getLogger(ValidCodeUtils.class);
+
     public static String base64Valid(String base64) {
         try {
             BASE64Decoder decoder = new BASE64Decoder();
@@ -29,7 +33,7 @@ public class ValidCodeUtils {
             //将验证码图片的内容识别为字符串
             String result = instance.doOCR(bo);
             String finalResult = result.replaceAll("\\W", "");
-            System.out.println(result.trim() + "------>" + finalResult);
+            logger.info(result.trim() + "------>" + finalResult);
             return finalResult;
         } catch (IOException e) {
             e.printStackTrace();

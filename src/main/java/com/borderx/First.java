@@ -3,6 +3,7 @@ package com.borderx;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import com.borderx.bean.Pet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import org.apache.commons.httpclient.ConnectTimeoutException;
@@ -25,15 +26,30 @@ import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
 import org.apache.http.message.BasicHeader;
 import org.apache.http.protocol.HttpContext;
 import org.apache.http.util.EntityUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Created by borderx on 2018/2/4.
  */
 public class First {
+
+    private static final Logger logger = LoggerFactory.getLogger(First.class);
+
+    static final Object emptyLock = new Object();
+
+    static final ReentrantLock lock = new ReentrantLock();
+
+    static final Condition empty = lock.newCondition();
+
+    static final Condition notEmpty = lock.newCondition();
 
     static Properties config = null;
 
@@ -51,6 +67,7 @@ public class First {
     static HttpClientBuilder httpClientBuilder = null;
 
     static {
+
         connManager = new PoolingHttpClientConnectionManager(20, TimeUnit.SECONDS);
         connManager.setMaxTotal(200);
         connManager.setDefaultMaxPerRoute(200);
@@ -80,8 +97,7 @@ public class First {
     static {
         //client.getHttpConnectionManager().getParams().setConnectionTimeout(1000);
         //client.getHttpConnectionManager().getParams().setSoTimeout(1000);
-
-        System.out.println(System.getProperty("user.dir"));
+        logger.info(System.getProperty("user.dir"));
         String filePath = System.getProperty("user.dir") + File.separator +"config.properties";
         InputStream in = null;
         config = new Properties();
@@ -99,9 +115,9 @@ public class First {
 
     public static void main(String[] args) throws Exception {
         whoAmI();
-        new Thread(() -> buy()).start();
+        new Thread(() -> find()).start();
         new Thread(() -> sale()).start();
-
+        new Thread(() -> buy()).start();
         new Scanner(System.in).nextLine();
     }
 
@@ -116,14 +132,14 @@ public class First {
                 if ("00".equals(user.getString("errorNo"))) {
                     String userName = user.getJSONObject("data").getString("userName");
                     String amount = user.getJSONObject("data").getString("amount");
-                    System.out.println("-------------userName:" + userName + ",amount:" + amount + "------------------");
+                    logger.info("-------------userName:{},amount:{}------------------", userName, amount);
                     if(Double.valueOf(amount) <= Double.valueOf(config.getProperty("amountLimit"))) {
-                        System.out.println("-------------userName:" + userName + ",amount:" + amount + ",start sale------------------");
+                        logger.info("-------------userName:{},amount:{},start sale------------------", userName, amount);
                         realSale();
                     }
                 }
             }
-            System.out.println("sale end:" + count++);
+            logger.info("sale end:{}", count++);
             try {
                 Thread.sleep(1000 * 60 * 10);
             } catch (InterruptedException e) {
@@ -185,51 +201,131 @@ public class First {
         if(StringUtils.isNotBlank(result)) {
             JSONObject data = JSON.parseObject(result);
             if("00".equals(data.getString("errorNo"))) {
-                System.out.println("--------sale petId:" + petId + " success-----------");
+                logger.info("--------sale petId:{} success-----------", petId);
                 return true;
             }
         }
-        System.out.println("--------sale petId:" + petId + " fail-----------");
+        logger.info("--------sale petId:{} fail-----------", petId);
         return false;
     }
 
-    public static void buy() {
+    private static void notEmptyBlock() {
+        lock.lock();
+        try {
+            while(!pets.isEmpty()) {
+                notEmpty.await();
+            }
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private static void emptyBlock() {
+        lock.lock();
+        try {
+            while(pets.isEmpty()) {
+                empty.await();
+            }
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private static void emptyWakeUp() {
+        lock.lock();
+        try {
+            notEmpty.signalAll();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private static void notEmptyWakeUp() {
+        lock.lock();
+        try {
+            empty.signalAll();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public static void find() {
         int count = 0;
+        int page = 0;
         while(true) {
-            int page = (count % 5) + 1;
-            String listStr = request("https://pet-chain.baidu.com/data/market/queryPetsOnSale", "{\"pageNo\":" + page + ",\"pageSize\":20,\"querySortType\":\"AMOUNT_ASC\",\"petIds\":[],\"lastAmount\":null,\"lastRareDegree\":null,\"requestId\":1517729851864,\"appId\":1,\"tpl\":\"\"}");
+            notEmptyBlock();
+            page = (page % 5) + 1;
+            boolean find = false;
+            String listStr = request("https://pet-chain.baidu.com/data/market/queryPetsOnSale", "{\"pageNo\":" + page + ",\"pageSize\":10,\"querySortType\":\"AMOUNT_ASC\",\"petIds\":[],\"lastAmount\":null,\"lastRareDegree\":null,\"requestId\":" + new Date().getTime() + ",\"appId\":1,\"tpl\":\"\"}");
             if (StringUtils.isNotBlank(listStr)) {
                 JSONObject data = JSON.parseObject(listStr);
                 if ("00".equals(data.getString("errorNo"))) {
-                    boolean need = false;
-                    JSONArray list = data.getJSONObject("data").getJSONArray("petsOnSale");
+                    List<Pet> list = JSON.parseArray(data.getJSONObject("data").getJSONArray("petsOnSale").toJSONString(), Pet.class);
                     for (int i = 0; i < list.size(); i++) {
-                        JSONObject object = list.getJSONObject(i);
-                        int generation = object.getInteger("generation");
-                        String petId = object.getString("petId");
-                        double amount = object.getDouble("amount");
-                        int rareDegree = object.getInteger("rareDegree");
-                        String validCode = object.getString("validCode");
+                        Pet pet = list.get(i);
+                        int generation = pet.getGeneration();
+                        String petId = pet.getPetId();
+                        double amount = pet.getAmount();
+                        int rareDegree = pet.getRareDegree();
+                        String validCode = pet.getValidCode();
                         if (gone.contains(petId)) {
                             continue;
                         }
                         if (amount <= Double.valueOf(config.getProperty("rareDegree" + rareDegree)) && generation == 0) {
-                            need = true;
-                            buy0(petId, rareDegree, validCode);
+                            logger.info("find pet:{},amount:{}", petId, amount);
+                            find = true;
+                            pets.push(pet);
+                            notEmptyWakeUp();
+//                            synchronized (emptyLock) {
+//                                emptyLock.notifyAll();
+//                            }
+                            break;
+//                            buy0(petId, rareDegree, validCode);
                         }
                     }
-                    if(!need) {
-                        long noNeedSleep = Long.valueOf(config.getProperty("noNeedSleep", "100"));
-                        try {
-                            Thread.sleep(noNeedSleep);
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                        }
-                        System.out.println("noNeedSleep " + noNeedSleep+ ".....");
-                    }
+                    page ++;
                 }
             }
-            System.out.println("buy end:" + count++);
+            if(!find) {
+                logger.info("not find start sleep ...");
+                try {
+                    Thread.sleep(2000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            logger.info("find end:{}", count++);
+        }
+    }
+
+    private static LinkedBlockingDeque<Pet> pets = new LinkedBlockingDeque<>();
+
+    public static void buy() {
+        while(true) {
+            if(pets.isEmpty()) {
+                emptyBlock();
+//                synchronized (emptyLock) {
+//                    try {
+//                        emptyLock.wait();
+//                    } catch (InterruptedException e) {
+//                        e.printStackTrace();
+//                    }
+//                }
+            } else {
+                while(!pets.isEmpty()) {
+                    logger.info("pets:{},{}", pets.size(), JSON.toJSONString(pets));
+                    Pet pet = pets.pop();
+                    int flag = buy0(pet.getPetId(), pet.getRareDegree(), pet.getValidCode());
+                    if(flag < 0) {
+                        pets.push(pet);
+                    }
+                }
+                emptyWakeUp();
+            }
         }
     }
 
@@ -242,6 +338,7 @@ public class First {
         params.put("tpl", "");
         String result = request(url, JSON.toJSONString(params));
         if (StringUtils.isNotBlank(result)) {
+//            CommonResponse response = JSON.parseObject(result, CommonResponse.class);
             JSONObject data = JSON.parseObject(result);
             if ("00".equals(data.getString("errorNo"))) {
                 String id = data.getJSONObject("data").getString("id");
@@ -256,36 +353,47 @@ public class First {
                     if (StringUtils.isNotBlank(res)) {
                         JSONObject b = JSON.parseObject(res);
                         if ("10002".equals(b.getString("errorNo"))) {
+                            //他人下单
                             gone.add(petId);
-                            System.out.println("gone.size:" + gone.size());
+                            logger.info("gone.size:{}", gone.size());
+                            return 10;
                         }
                         if ("10003".equals(b.getString("errorNo"))) {
-                            System.out.println("buying-------------------------");
+                            //上一笔交易中
+                            logger.info("buying-------------------------");
                             try {
                                 Thread.sleep(10000);
                             } catch (InterruptedException e) {
                                 e.printStackTrace();
                             }
+                            return -2;
                         }
                         if ("00".equals(b.getString("errorNo"))) {
-                            System.out.println("buy success,amount:" + amount + ",petId:" + petId + ",id:" + id);
+                            //成功
+                            logger.info("buy success,amount:{},petId:{},id:{}", new Object[]{amount, petId, id});
                             try {
                                 Thread.sleep(10000);
                             } catch (InterruptedException e) {
                                 e.printStackTrace();
                             }
+                            return 1;
+                        }
+                        if ("100".equals(b.getString("errorNo"))) {
+                            logger.info("gone.size:{}", gone.size());
+                            //验证码错误
+                            return -1;
                         }
                     }
                 }
             }
         }
-        return -1;
+        return 0;
     }
 
     public static Map<String, String> validInfo() {
         int count = 1;
         while(true) {
-            System.out.println("validInfo time:" + count);
+            logger.info("validInfo time:{}", count);
             Map<String, String> gen = gen();
             if(gen != null) {
                 String img = gen.get("img");
@@ -319,13 +427,11 @@ public class First {
                 return map;
             }
         }
-        System.out.println("gen fail........");
+        logger.info("gen fail........");
         return null;
     }
 
     public static String getBuyParam(String petId, String amount, String validCode, String seed, String captcha) {
-//        String pre = request("https://pet-chain.baidu.com/data/market/shouldJump2JianDan", "{\"requestId\":1517888235078,\"appId\":1,\"tpl\":\"\"}");
-//        System.out.println(pre);
         Map<String, Object> params = Maps.newHashMap();
         params.put("petId", petId);
         params.put("amount", amount);
@@ -358,23 +464,23 @@ public class First {
             int httpStatus = client.executeMethod(postMethod);
             if (httpStatus == 200) {
                 String response = postMethod.getResponseBodyAsString();
-                System.out.println(response);
+                logger.info(response);
                 return response;
             }
-            System.out.println(httpStatus);
+            logger.info("httpStatus:{}", httpStatus);
             return null;
         } catch (org.apache.http.NoHttpResponseException e1) {
 //            e1.printStackTrace();
             try {
                 long noHttpResponseSleep = Long.valueOf(config.getProperty("noHttpResponseSleep", "5000"));
-                System.out.println("NoHttpResponseException sleep " + noHttpResponseSleep + ".......");
+                logger.info("NoHttpResponseException sleep " + noHttpResponseSleep + ".......");
                 Thread.sleep(noHttpResponseSleep);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
         } catch (Exception e) {
             e.printStackTrace();
-            System.out.println(e.getMessage());
+            logger.info(e.getMessage());
         } finally {
             if(postMethod != null) {
                 postMethod.releaseConnection();
@@ -418,26 +524,26 @@ public class First {
                 HttpEntity resEntity = response.getEntity();
                 String message = EntityUtils.toString(resEntity, "utf-8");
                 if(!"https://pet-chain.baidu.com/data/captcha/gen".equals(url)) {
-                    System.out.println(message);
+                    logger.info(message);
                 }
                 EntityUtils.consume(resEntity);
                 return message;
             }
-            System.out.println(response.getStatusLine().getStatusCode());
+            logger.info("statusCode:{}", response.getStatusLine().getStatusCode());
         } catch (NoHttpResponseException e1) {
 //            e1.printStackTrace();
             try {
                 long noHttpResponseSleep = Long.valueOf(config.getProperty("noHttpResponseSleep", "5000"));
-                System.out.println("NoHttpResponseException sleep " + noHttpResponseSleep + "......." + e1.getMessage());
+                logger.info("NoHttpResponseException sleep {}.......{}", noHttpResponseSleep, e1.getMessage());
                 Thread.sleep(noHttpResponseSleep);
             } catch (Exception e) {
                 e.printStackTrace();
             }
         } catch (ConnectTimeoutException e) {
-            System.out.println("ConnectTimeoutException:" + e.getMessage());
+            logger.info("ConnectTimeoutException:{}", e.getMessage());
         } catch (Exception e) {
             e.printStackTrace();
-            System.out.println(e.getMessage());
+            logger.info(e.getMessage());
         }
         if("https://pet-chain.baidu.com/data/txn/create".equals(url)) {
             return request(url, params);
@@ -456,7 +562,7 @@ public class First {
                 who = true;
                 String userName = user.getJSONObject("data").getString("userName");
                 String amount = user.getJSONObject("data").getString("amount");
-                System.out.println("-------------userName:" + userName + ",amount:" + amount + "------------------");
+                logger.info("-------------userName:{},amount:{}------------------", userName, amount);
             }
         }
         if(!who) {
