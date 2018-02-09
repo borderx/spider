@@ -126,11 +126,13 @@ public class First {
     private static final Statistics statistics = new Statistics();
 
     public static void statistics() {
-        logger.info("statistics:{}", JSON.toJSONString(statistics));
-        try {
-            Thread.sleep(1000 * 60 * 10);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
+        while(true) {
+            logger.info("statistics:{}", JSON.toJSONString(statistics));
+            try {
+                Thread.sleep(1000 * 60 * 10);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
         }
     }
 
