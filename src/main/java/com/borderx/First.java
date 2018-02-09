@@ -4,6 +4,7 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.borderx.bean.Pet;
+import com.borderx.bean.Statistics;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import org.apache.commons.httpclient.ConnectTimeoutException;
@@ -118,7 +119,19 @@ public class First {
         new Thread(() -> find()).start();
         new Thread(() -> sale()).start();
         new Thread(() -> buy()).start();
+        new Thread(() -> statistics()).start();
         new Scanner(System.in).nextLine();
+    }
+
+    private static final Statistics statistics = new Statistics();
+
+    public static void statistics() {
+        logger.info("statistics:{}", JSON.toJSONString(statistics));
+        try {
+            Thread.sleep(1000 * 60 * 10);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
     }
 
     public static void sale() {
@@ -278,6 +291,7 @@ public class First {
                         if (amount <= Double.valueOf(config.getProperty("rareDegree" + rareDegree)) && generation == 0) {
                             logger.info("find pet:{},amount:{}", petId, amount);
                             find = true;
+                            statistics.totalIncrease();
                             pets.push(pet);
                             notEmptyWakeUp();
 //                            synchronized (emptyLock) {
@@ -356,6 +370,7 @@ public class First {
                             //他人下单
                             gone.add(petId);
                             logger.info("gone.size:{}", gone.size());
+                            statistics.failIncrease();
                             return 10;
                         }
                         if ("10003".equals(b.getString("errorNo"))) {
@@ -371,6 +386,7 @@ public class First {
                         if ("00".equals(b.getString("errorNo"))) {
                             //成功
                             logger.info("buy success,amount:{},petId:{},id:{}", new Object[]{amount, petId, id});
+                            statistics.successIncrease();
                             try {
                                 Thread.sleep(10000);
                             } catch (InterruptedException e) {
@@ -380,6 +396,7 @@ public class First {
                         }
                         if ("100".equals(b.getString("errorNo"))) {
                             logger.info("gone.size:{}", gone.size());
+                            statistics.codeErrorIncrease();
                             //验证码错误
                             return -1;
                         }
