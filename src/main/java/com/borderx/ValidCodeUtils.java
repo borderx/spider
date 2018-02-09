@@ -29,7 +29,8 @@ public class ValidCodeUtils {
             BufferedImage bo = removeLine(bi, 2);
 
             Tesseract instance = new Tesseract();
-            instance.setDatapath("/usr/local/Cellar/tesseract/3.05.01/share/tessdata");
+            //instance.setDatapath("/usr/local/Cellar/tesseract/3.05.01/share/tessdata");
+            instance.setDatapath("E:\\java\\workspace\\tessdata");
             //将验证码图片的内容识别为字符串
             String result = instance.doOCR(bo);
             String finalResult = result.replaceAll("\\W", "");
